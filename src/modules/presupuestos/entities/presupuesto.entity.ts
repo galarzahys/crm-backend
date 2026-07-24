@@ -1,0 +1,72 @@
+import { Column, Entity, JoinColumn, ManyToOne, OneToMany } from 'typeorm';
+import { EntidadBase } from '../../../common/entities/entidad-base.entity';
+import { Moneda } from '../../listas-precio/entities/lista-precio.entity';
+
+export type TipoServicio = 'venta_contenedores' | 'alquiler_contenedores' | 'modificacion' | 'accesorios';
+
+@Entity('presupuestos')
+export class Presupuesto extends EntidadBase {
+  @Column({ name: 'cliente_id' })
+  clienteId: number;
+
+  @Column({ name: 'vendedor_id' })
+  vendedorId: number;
+
+  @Column({ type: 'varchar' })
+  servicio: TipoServicio;
+
+  @Column({ name: 'plazo_validez_dias' })
+  plazoValidezDias: number;
+
+  @Column({ name: 'fecha_emision', type: 'datetime' })
+  fechaEmision: Date;
+
+  @Column({ name: 'lista_precio_id' })
+  listaPrecioId: number;
+
+  @Column({ name: 'descuento_general_porcentaje', type: 'decimal', precision: 7, scale: 4, default: 0 })
+  descuentoGeneralPorcentaje: number;
+
+  @Column({ name: 'descuento_general_valor', type: 'decimal', precision: 14, scale: 2, default: 0 })
+  descuentoGeneralValor: number;
+
+  @OneToMany(() => PresupuestoItem, (item) => item.presupuesto, { cascade: true })
+  items: PresupuestoItem[];
+}
+
+/**
+ * Línea de artículo dentro de un presupuesto. El precio, la moneda, la
+ * lista usada y el descuento quedan **congelados** acá al momento de
+ * crear el presupuesto (no se recalculan si después cambia el precio de
+ * lista) — mismo criterio que en el frontend.
+ */
+@Entity('presupuesto_items')
+export class PresupuestoItem extends EntidadBase {
+  @Column({ name: 'presupuesto_id' })
+  presupuestoId: number;
+
+  @ManyToOne(() => Presupuesto, (presupuesto) => presupuesto.items, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'presupuesto_id' })
+  presupuesto: Presupuesto;
+
+  @Column({ name: 'articulo_id' })
+  articuloId: number;
+
+  @Column({ name: 'lista_precio_id' })
+  listaPrecioId: number;
+
+  @Column({ name: 'precio_unitario', type: 'decimal', precision: 14, scale: 2 })
+  precioUnitario: number;
+
+  @Column({ type: 'varchar' })
+  moneda: Moneda;
+
+  @Column()
+  cantidad: number;
+
+  @Column({ name: 'descuento_porcentaje', type: 'decimal', precision: 7, scale: 4, default: 0 })
+  descuentoPorcentaje: number;
+
+  @Column({ name: 'descuento_valor', type: 'decimal', precision: 14, scale: 2, default: 0 })
+  descuentoValor: number;
+}
