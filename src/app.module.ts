@@ -12,6 +12,7 @@ import { ListasPrecioModule } from './modules/listas-precio/listas-precio.module
 import { PresupuestosModule } from './modules/presupuestos/presupuestos.module';
 import { CamposFichaClienteModule } from './modules/campos-ficha-cliente/campos-ficha-cliente.module';
 import { MaterialesModule } from './modules/materiales/materiales.module';
+import { ImagenesModule } from './modules/imagenes/imagenes.module';
 
 @Module({
   controllers: [AppController],
@@ -33,6 +34,7 @@ import { MaterialesModule } from './modules/materiales/materiales.module';
     PresupuestosModule,
     CamposFichaClienteModule,
     MaterialesModule,
+    ImagenesModule,
   ],
 })
 export class AppModule {}

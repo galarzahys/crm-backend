@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common';
 import { CrearPresupuestoDto } from './presupuesto.dto';
 import { PresupuestosService } from './presupuestos.service';
 
@@ -19,5 +19,15 @@ export class PresupuestosController {
   @Post()
   crear(@Body() dto: CrearPresupuestoDto) {
     return this.presupuestosService.crearConItems(dto);
+  }
+
+  @Put(':id')
+  actualizar(@Param('id', ParseIntPipe) id: number, @Body() dto: CrearPresupuestoDto) {
+    return this.presupuestosService.actualizarConItems(id, dto);
+  }
+
+  @Delete(':id')
+  eliminar(@Param('id', ParseIntPipe) id: number) {
+    return this.presupuestosService.eliminar(id);
   }
 }

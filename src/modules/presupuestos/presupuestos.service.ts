@@ -45,4 +45,32 @@ export class PresupuestosService extends CrudService<Presupuesto> {
 
     return this.obtenerPorId(presupuesto.id);
   }
+
+  /**
+   * Actualiza un presupuesto existente y reemplaza sus ítems. A propósito
+   * NO toca `fechaEmision` (la fecha de emisión original se mantiene aunque
+   * se edite el presupuesto después).
+   */
+  async actualizarConItems(id: number, dto: CrearPresupuestoDto): Promise<Presupuesto> {
+    await this.actualizar(id, {
+      clienteId: dto.clienteId,
+      vendedorId: dto.vendedorId,
+      servicio: dto.servicio,
+      plazoValidezDias: dto.plazoValidezDias,
+      listaPrecioId: dto.listaPrecioId,
+      descuentoGeneralPorcentaje: dto.descuentoGeneralPorcentaje,
+      descuentoGeneralValor: dto.descuentoGeneralValor,
+    });
+
+    const actuales = await this.repositorioItems.find({ where: { presupuestoId: id, activo: true } as any });
+    for (const item of actuales) {
+      await this.repositorioItems.delete(item.id);
+    }
+    for (const item of dto.items) {
+      const nuevo = this.repositorioItems.create({ presupuestoId: id, ...item });
+      await this.repositorioItems.save(nuevo);
+    }
+
+    return this.obtenerPorId(id);
+  }
 }
