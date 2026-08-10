@@ -20,11 +20,6 @@ export class Articulo extends EntidadBase {
   @JoinColumn({ name: 'categoria_id' })
   categoria: Categoria;
 
-  /**
-   * Clave del objeto en el bucket de S3. Por ahora solo se persiste el
-   * dato; la generación de URLs prefirmadas de subida/lectura queda para
-   * cuando conectemos el módulo de almacenamiento (ver README).
-   */
   @Column({ name: 'imagen_key', type: 'varchar', nullable: true })
   imagenKey: string | null;
 
@@ -36,6 +31,9 @@ export class Articulo extends EntidadBase {
 
   @OneToMany(() => ArticuloComponente, (componente) => componente.articulo, { cascade: true })
   componentes: ArticuloComponente[];
+
+  @OneToMany(() => ArticuloSubarticulo, (subarticulo) => subarticulo.articulo, { cascade: true })
+  subarticulos: ArticuloSubarticulo[];
 }
 
 /**
@@ -82,6 +80,36 @@ export class ArticuloComponente extends EntidadBase {
 
   @Column({ name: 'material_id' })
   materialId: number;
+
+  @Column({ type: 'decimal', precision: 14, scale: 4 })
+  cantidad: number;
+}
+
+/**
+ * Composición de costos de un artículo a partir de **otro artículo**
+ * (subartículo). Tabla `articulo_subarticulos`: `articulo_id` es el
+ * "padre" (con cascade — si se borra el padre, se borra la relación, no
+ * el subartículo en sí), `subarticulo_id` es el artículo "hijo" que se
+ * usa como componente. Es plata columna simple, sin relación de TypeORM
+ * cargada hacia el subartículo, para no acoplar innecesariamente (el
+ * servicio la resuelve a mano cuando hace falta, sobre todo para el
+ * cálculo recursivo de costo — ver `ArticulosService.calcularCostoTotal`).
+ *
+ * El costo del subartículo (recursivo: puede tener sus propios materiales
+ * y sus propios subartículos) pasa a formar parte del costo del artículo
+ * padre, multiplicado por `cantidad`.
+ */
+@Entity('articulo_subarticulos')
+export class ArticuloSubarticulo extends EntidadBase {
+  @Column({ name: 'articulo_id' })
+  articuloId: number;
+
+  @ManyToOne(() => Articulo, (articulo) => articulo.subarticulos, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'articulo_id' })
+  articulo: Articulo;
+
+  @Column({ name: 'subarticulo_id' })
+  subarticuloId: number;
 
   @Column({ type: 'decimal', precision: 14, scale: 4 })
   cantidad: number;

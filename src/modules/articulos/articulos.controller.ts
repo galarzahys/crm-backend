@@ -16,6 +16,12 @@ export class ArticulosController {
     return this.articulosService.obtenerPorId(id);
   }
 
+  /** Costo total recursivo (materiales directos + subartículos), agrupado por moneda. */
+  @Get(':id/costo-total')
+  costoTotal(@Param('id', ParseIntPipe) id: number) {
+    return this.articulosService.calcularCostoTotal(id);
+  }
+
   @Post()
   crear(@Body() dto: GuardarArticuloDto) {
     return this.articulosService.crearConAtributos(dto);

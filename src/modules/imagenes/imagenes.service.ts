@@ -23,7 +23,7 @@ export class ImagenesService {
 
   constructor(private readonly configService: ConfigService) {
     this.region = this.configService.get<string>('AWS_REGION') ?? 'sa-east-1';
-      this.bucket = this.configService.get<string>('S3_BUCKET_NAME') ?? 'crm-traful';
+    this.bucket = this.configService.get<string>('S3_BUCKET_NAME') ?? 'crm-traful';
     this.s3 = new S3Client({ region: this.region });
   }
 

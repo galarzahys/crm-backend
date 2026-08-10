@@ -35,6 +35,16 @@ export class ComponenteAsignadoDto {
   cantidad: number;
 }
 
+/** Otro artículo usado como componente de costo de este ("subartículo"). */
+export class SubarticuloAsignadoDto {
+  @IsInt()
+  subarticuloId: number;
+
+  @IsNumber()
+  @IsPositive()
+  cantidad: number;
+}
+
 export class GuardarArticuloDto {
   @IsString()
   @IsNotEmpty()
@@ -70,6 +80,12 @@ export class GuardarArticuloDto {
   @ValidateNested({ each: true })
   @Type(() => ComponenteAsignadoDto)
   componentes?: ComponenteAsignadoDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SubarticuloAsignadoDto)
+  subarticulos?: SubarticuloAsignadoDto[];
 }
 
 export class ListarArticulosQueryDto extends PaginacionQueryDto {
