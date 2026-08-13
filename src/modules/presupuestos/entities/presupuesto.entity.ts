@@ -30,6 +30,15 @@ export class Presupuesto extends EntidadBase {
   @Column({ name: 'descuento_general_valor', type: 'decimal', precision: 14, scale: 2, default: 0 })
   descuentoGeneralValor: number;
 
+  /**
+   * Cotización del dólar (1 USD = X ARS) del día del presupuesto. Se usa
+   * para convertir a pesos el costo de los artículos costeados en dólares,
+   * y así poder calcular el desglose de costos (materiales ARS/USD, mano
+   * de obra) con porcentajes correctos sobre un total único en pesos.
+   */
+  @Column({ name: 'cotizacion_dolar', type: 'decimal', precision: 12, scale: 4, nullable: true })
+  cotizacionDolar: number | null;
+
   @OneToMany(() => PresupuestoItem, (item) => item.presupuesto, { cascade: true })
   items: PresupuestoItem[];
 }

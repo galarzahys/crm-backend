@@ -36,6 +36,7 @@ export class PresupuestosService extends CrudService<Presupuesto> {
       listaPrecioId: dto.listaPrecioId,
       descuentoGeneralPorcentaje: dto.descuentoGeneralPorcentaje,
       descuentoGeneralValor: dto.descuentoGeneralValor,
+      cotizacionDolar: dto.cotizacionDolar,
     });
 
     for (const item of dto.items) {
@@ -60,6 +61,7 @@ export class PresupuestosService extends CrudService<Presupuesto> {
       listaPrecioId: dto.listaPrecioId,
       descuentoGeneralPorcentaje: dto.descuentoGeneralPorcentaje,
       descuentoGeneralValor: dto.descuentoGeneralValor,
+      cotizacionDolar: dto.cotizacionDolar,
     });
 
     const actuales = await this.repositorioItems.find({ where: { presupuestoId: id, activo: true } as any });

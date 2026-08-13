@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { CrudService } from '../../common/crud.service';
 import { ResultadoPaginado } from '../../common/interfaces/resultado-paginado.interface';
 import { Moneda } from '../listas-precio/entities/lista-precio.entity';
+import { TipoMaterial } from '../materiales/material.entity';
 import { MaterialesService } from '../materiales/materiales.service';
 import { GuardarArticuloDto, ListarArticulosQueryDto } from './articulo.dto';
 import { Articulo, ArticuloAtributo, ArticuloComponente, ArticuloSubarticulo } from './entities/articulo.entity';
@@ -12,6 +13,13 @@ const CAMPOS_BUSQUEDA = ['nombre', 'descripcionComprador'];
 
 /** Total de costo agrupado por moneda, resultado de `calcularCostoTotal`. */
 export interface TotalCostoPorMoneda {
+  moneda: Moneda;
+  total: number;
+}
+
+/** Total de costo agrupado por tipo de componente (material/mano de obra/accesorio) y moneda, resultado de `calcularCostoDetallado`. */
+export interface TotalCostoDetallado {
+  tipo: TipoMaterial;
   moneda: Moneda;
   total: number;
 }
@@ -162,6 +170,68 @@ export class ArticulosService extends CrudService<Articulo> {
     }
 
     return Array.from(totales.entries()).map(([moneda, total]) => ({
+      moneda,
+      total: Math.round((total + Number.EPSILON) * 100) / 100,
+    }));
+  }
+
+  /**
+   * Igual que `calcularCostoTotal`, pero además discrimina por tipo de
+   * componente (material / mano de obra / accesorio) — se usa para el
+   * desglose de costos del presupuesto. Recursivo: el desglose de un
+   * subartículo se preserva por tipo al burbujear hacia el padre (un
+   * material dentro de un subartículo sigue contando como "material"
+   * arriba, no se mezcla con la mano de obra del padre).
+   */
+  async calcularCostoDetallado(articuloId: number, visitados: Set<number> = new Set()): Promise<TotalCostoDetallado[]> {
+    if (visitados.has(articuloId)) {
+      return [];
+    }
+    visitados.add(articuloId);
+
+    const articulo = await this.repositorio.findOne({
+      where: { id: articuloId, activo: true } as any,
+      relations: { componentes: true, subarticulos: true },
+    });
+    if (!articulo) {
+      return [];
+    }
+
+    const totales = new Map<string, TotalCostoDetallado>();
+    const acumular = (tipo: TipoMaterial, moneda: Moneda, monto: number) => {
+      const clave = `${tipo}|${moneda}`;
+      const actual = totales.get(clave);
+      if (actual) {
+        actual.total += monto;
+      } else {
+        totales.set(clave, { tipo, moneda, total: monto });
+      }
+    };
+
+    for (const componente of articulo.componentes ?? []) {
+      const costo = await this.materialesService.obtenerCosto(componente.materialId);
+      if (!costo) {
+        continue;
+      }
+      let tipo: TipoMaterial = 'material';
+      try {
+        const material = await this.materialesService.obtenerPorId(componente.materialId);
+        tipo = material.tipo;
+      } catch {
+        // Material dado de baja o inexistente: lo contamos igual como "material" genérico.
+      }
+      acumular(tipo, costo.moneda, componente.cantidad * costo.valor);
+    }
+
+    for (const subarticulo of articulo.subarticulos ?? []) {
+      const detalleSub = await this.calcularCostoDetallado(subarticulo.subarticuloId, visitados);
+      for (const { tipo, moneda, total } of detalleSub) {
+        acumular(tipo, moneda, total * subarticulo.cantidad);
+      }
+    }
+
+    return Array.from(totales.values()).map(({ tipo, moneda, total }) => ({
+      tipo,
       moneda,
       total: Math.round((total + Number.EPSILON) * 100) / 100,
     }));

@@ -5,6 +5,7 @@ import {
   IsIn,
   IsInt,
   IsNumber,
+  IsOptional,
   IsPositive,
   Min,
   ValidateNested,
@@ -66,6 +67,12 @@ export class CrearPresupuestoDto {
   @IsNumber()
   @Min(0)
   descuentoGeneralValor: number;
+
+  /** Cotización del dólar del día (1 USD = X ARS), para el desglose de costos. */
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  cotizacionDolar?: number | null | undefined;
 
   @IsArray()
   @ArrayMinSize(1)

@@ -22,6 +22,12 @@ export class ArticulosController {
     return this.articulosService.calcularCostoTotal(id);
   }
 
+  /** Igual que costo-total, pero discriminado por tipo de componente (material/mano de obra/accesorio) y moneda. */
+  @Get(':id/costo-detallado')
+  costoDetallado(@Param('id', ParseIntPipe) id: number) {
+    return this.articulosService.calcularCostoDetallado(id);
+  }
+
   @Post()
   crear(@Body() dto: GuardarArticuloDto) {
     return this.articulosService.crearConAtributos(dto);
