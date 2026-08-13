@@ -1,8 +1,16 @@
 import { Column, Entity, JoinColumn, ManyToOne, OneToMany } from 'typeorm';
 import { EntidadBase } from '../../../common/entities/entidad-base.entity';
 import { Moneda } from '../../listas-precio/entities/lista-precio.entity';
+import { TipoMaterial } from '../../materiales/material.entity';
 
 export type TipoServicio = 'venta_contenedores' | 'alquiler_contenedores' | 'modificacion' | 'accesorios';
+
+/** Costo (no precio de venta) por unidad, discriminado por tipo y moneda — igual forma que devuelve `GET /articulos/:id/costo-detallado`. */
+export interface CostoDetalladoItem {
+  tipo: TipoMaterial;
+  moneda: Moneda;
+  total: number;
+}
 
 @Entity('presupuestos')
 export class Presupuesto extends EntidadBase {
@@ -45,9 +53,11 @@ export class Presupuesto extends EntidadBase {
 
 /**
  * Línea de artículo dentro de un presupuesto. El precio, la moneda, la
- * lista usada y el descuento quedan **congelados** acá al momento de
- * crear el presupuesto (no se recalculan si después cambia el precio de
- * lista) — mismo criterio que en el frontend.
+ * lista usada, el descuento **y el costo** (`costoDetallado`) quedan
+ * congelados acá al momento de crear/editar el presupuesto (no se
+ * recalculan solos si después cambia el precio de lista o el costo de
+ * algún material) — así un presupuesto viejo siempre muestra el margen
+ * real que tenía en su momento, no uno recalculado con datos de hoy.
  */
 @Entity('presupuesto_items')
 export class PresupuestoItem extends EntidadBase {
@@ -78,4 +88,14 @@ export class PresupuestoItem extends EntidadBase {
 
   @Column({ name: 'descuento_valor', type: 'decimal', precision: 14, scale: 2, default: 0 })
   descuentoValor: number;
+
+  /**
+   * Costo (de producción, no de venta) **por unidad** de este artículo,
+   * discriminado por tipo y moneda, congelado al momento de agregarlo al
+   * presupuesto. El total de esa línea sale de multiplicar cada entrada
+   * por `cantidad` (ambos ya congelados) — así no hace falta guardar el
+   * total por separado.
+   */
+  @Column({ name: 'costo_detallado', type: 'simple-json', nullable: true })
+  costoDetallado: CostoDetalladoItem[] | null;
 }
