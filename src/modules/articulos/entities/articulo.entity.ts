@@ -32,6 +32,9 @@ export class Articulo extends EntidadBase {
   @OneToMany(() => ArticuloComponente, (componente) => componente.articulo, { cascade: true })
   componentes: ArticuloComponente[];
 
+  @OneToMany(() => ArticuloManoDeObra, (manoDeObra) => manoDeObra.articulo, { cascade: true })
+  manoDeObra: ArticuloManoDeObra[];
+
   @OneToMany(() => ArticuloSubarticulo, (subarticulo) => subarticulo.articulo, { cascade: true })
   subarticulos: ArticuloSubarticulo[];
 }
@@ -61,13 +64,12 @@ export class ArticuloAtributo extends EntidadBase {
 }
 
 /**
- * Composición de costos de un artículo: qué materiales/mano de obra
- * entran, y en qué cantidad (en la unidad de medida propia del material).
- * Tabla de relación `articulo_componentes`, con clave foránea
- * `articulo_id`. `material_id` se guarda como columna simple (sin
- * relación de TypeORM cargada) para no acoplar el módulo de artículos al
- * de materiales — el frontend ya tiene la lista de materiales (con su
- * costo) cargada y resuelve el detalle de costo ahí.
+ * Composición de costos de un artículo: qué materiales entran, y en qué
+ * cantidad (en la unidad de medida propia del material). Tabla de
+ * relación `articulo_componentes`. `material_id` se guarda como columna
+ * simple (sin relación de TypeORM cargada) para no acoplar el módulo de
+ * artículos al de materiales — el frontend ya tiene la lista de
+ * materiales (con su costo) cargada y resuelve el detalle ahí.
  */
 @Entity('articulo_componentes')
 export class ArticuloComponente extends EntidadBase {
@@ -86,18 +88,31 @@ export class ArticuloComponente extends EntidadBase {
 }
 
 /**
+ * Composición de costos de un artículo a partir de mano de obra (tabla
+ * hermana de `ArticuloComponente`, para el recurso "mano de obra" en vez
+ * de "material" — separación estructural, no por un campo de tipo).
+ */
+@Entity('articulo_mano_obra')
+export class ArticuloManoDeObra extends EntidadBase {
+  @Column({ name: 'articulo_id' })
+  articuloId: number;
+
+  @ManyToOne(() => Articulo, (articulo) => articulo.manoDeObra, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'articulo_id' })
+  articulo: Articulo;
+
+  @Column({ name: 'mano_de_obra_id' })
+  manoDeObraId: number;
+
+  @Column({ type: 'decimal', precision: 14, scale: 4 })
+  cantidad: number;
+}
+
+/**
  * Composición de costos de un artículo a partir de **otro artículo**
- * (subartículo). Tabla `articulo_subarticulos`: `articulo_id` es el
- * "padre" (con cascade — si se borra el padre, se borra la relación, no
- * el subartículo en sí), `subarticulo_id` es el artículo "hijo" que se
- * usa como componente. Es plata columna simple, sin relación de TypeORM
- * cargada hacia el subartículo, para no acoplar innecesariamente (el
- * servicio la resuelve a mano cuando hace falta, sobre todo para el
- * cálculo recursivo de costo — ver `ArticulosService.calcularCostoTotal`).
- *
- * El costo del subartículo (recursivo: puede tener sus propios materiales
- * y sus propios subartículos) pasa a formar parte del costo del artículo
- * padre, multiplicado por `cantidad`.
+ * (subartículo). El costo del subartículo (recursivo: puede tener sus
+ * propios materiales, mano de obra y subartículos) pasa a formar parte
+ * del costo del artículo padre, multiplicado por `cantidad`.
  */
 @Entity('articulo_subarticulos')
 export class ArticuloSubarticulo extends EntidadBase {

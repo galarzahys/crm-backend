@@ -1,13 +1,17 @@
 import { Column, Entity, JoinColumn, ManyToOne, OneToMany } from 'typeorm';
 import { EntidadBase } from '../../../common/entities/entidad-base.entity';
 import { Moneda } from '../../listas-precio/entities/lista-precio.entity';
-import { TipoMaterial } from '../../materiales/material.entity';
 
 export type TipoServicio = 'venta_contenedores' | 'alquiler_contenedores' | 'modificacion' | 'accesorios';
 
-/** Costo (no precio de venta) por unidad, discriminado por tipo y moneda — igual forma que devuelve `GET /articulos/:id/costo-detallado`. */
+/**
+ * Costo (no precio de venta) por unidad, discriminado por **origen**
+ * (`material` o `mano_obra` — estructural, viene de qué tabla lo generó,
+ * no de un campo que cargue el usuario) y moneda. Misma forma que
+ * devuelve `GET /articulos/:id/costo-detallado`.
+ */
 export interface CostoDetalladoItem {
-  tipo: TipoMaterial;
+  origen: 'material' | 'mano_obra';
   moneda: Moneda;
   total: number;
 }
@@ -91,10 +95,9 @@ export class PresupuestoItem extends EntidadBase {
 
   /**
    * Costo (de producción, no de venta) **por unidad** de este artículo,
-   * discriminado por tipo y moneda, congelado al momento de agregarlo al
-   * presupuesto. El total de esa línea sale de multiplicar cada entrada
-   * por `cantidad` (ambos ya congelados) — así no hace falta guardar el
-   * total por separado.
+   * discriminado por origen y moneda, congelado al momento de agregarlo
+   * al presupuesto. El total de esa línea sale de multiplicar cada
+   * entrada por `cantidad` (ambos ya congelados).
    */
   @Column({ name: 'costo_detallado', type: 'simple-json', nullable: true })
   costoDetallado: CostoDetalladoItem[] | null;

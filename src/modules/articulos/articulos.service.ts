@@ -4,12 +4,19 @@ import { Repository } from 'typeorm';
 import { CrudService } from '../../common/crud.service';
 import { ResultadoPaginado } from '../../common/interfaces/resultado-paginado.interface';
 import { Moneda } from '../listas-precio/entities/lista-precio.entity';
-import { TipoMaterial } from '../materiales/material.entity';
 import { MaterialesService } from '../materiales/materiales.service';
+import { ManoDeObraService } from '../mano-de-obra/mano-de-obra.service';
 import { GuardarArticuloDto, ListarArticulosQueryDto } from './articulo.dto';
-import { Articulo, ArticuloAtributo, ArticuloComponente, ArticuloSubarticulo } from './entities/articulo.entity';
+import {
+  Articulo,
+  ArticuloAtributo,
+  ArticuloComponente,
+  ArticuloManoDeObra,
+  ArticuloSubarticulo,
+} from './entities/articulo.entity';
 
-const CAMPOS_BUSQUEDA = ['nombre', 'descripcionComprador'];
+/** De qué "familia" de recurso viene un costo: estructural, no un dato que cargue el usuario. */
+export type OrigenCosto = 'material' | 'mano_obra';
 
 /** Total de costo agrupado por moneda, resultado de `calcularCostoTotal`. */
 export interface TotalCostoPorMoneda {
@@ -17,9 +24,9 @@ export interface TotalCostoPorMoneda {
   total: number;
 }
 
-/** Total de costo agrupado por tipo de componente (material/mano de obra/accesorio) y moneda, resultado de `calcularCostoDetallado`. */
+/** Total de costo agrupado por origen (material/mano de obra) y moneda, resultado de `calcularCostoDetallado`. */
 export interface TotalCostoDetallado {
-  tipo: TipoMaterial;
+  origen: OrigenCosto;
   moneda: Moneda;
   total: number;
 }
@@ -30,8 +37,10 @@ export class ArticulosService extends CrudService<Articulo> {
     @InjectRepository(Articulo) repositorio: Repository<Articulo>,
     @InjectRepository(ArticuloAtributo) private readonly repositorioAtributos: Repository<ArticuloAtributo>,
     @InjectRepository(ArticuloComponente) private readonly repositorioComponentes: Repository<ArticuloComponente>,
+    @InjectRepository(ArticuloManoDeObra) private readonly repositorioManoDeObra: Repository<ArticuloManoDeObra>,
     @InjectRepository(ArticuloSubarticulo) private readonly repositorioSubarticulos: Repository<ArticuloSubarticulo>,
     private readonly materialesService: MaterialesService,
+    private readonly manoDeObraService: ManoDeObraService,
   ) {
     super(repositorio, 'articulo');
   }
@@ -45,6 +54,7 @@ export class ArticulosService extends CrudService<Articulo> {
       .createQueryBuilder('articulo')
       .leftJoinAndSelect('articulo.atributos', 'atributoAsignado', 'atributoAsignado.activo = :activo', { activo: true })
       .leftJoinAndSelect('articulo.componentes', 'componente', 'componente.activo = :activo', { activo: true })
+      .leftJoinAndSelect('articulo.manoDeObra', 'manoDeObraAsignada', 'manoDeObraAsignada.activo = :activo', { activo: true })
       .leftJoinAndSelect('articulo.subarticulos', 'subarticulo', 'subarticulo.activo = :activo', { activo: true })
       .where('articulo.activo = :activo', { activo: true });
 
@@ -80,6 +90,9 @@ export class ArticulosService extends CrudService<Articulo> {
     if (dto.componentes !== undefined) {
       await this.reemplazarComponentes(articulo.id, dto.componentes);
     }
+    if (dto.manoDeObra !== undefined) {
+      await this.reemplazarManoDeObra(articulo.id, dto.manoDeObra);
+    }
     if (dto.subarticulos !== undefined) {
       // Un artículo recién creado no puede formar parte de ningún ciclo
       // todavía (nada puede referenciarlo de antes), así que acá no hace
@@ -98,15 +111,18 @@ export class ArticulosService extends CrudService<Articulo> {
       imagenKey: dto.imagenKey ?? null,
       imagenUrlVisualizacion: dto.imagenUrlVisualizacion ?? null,
     });
-    // Importante: `atributos`/`componentes`/`subarticulos` solo se
-    // reemplazan si vienen en el pedido (ver nota de más abajo, ya la
-    // habíamos agregado para no perder la composición al editar solo los
-    // datos básicos del artículo desde el formulario principal).
+    // Importante: `atributos`/`componentes`/`manoDeObra`/`subarticulos`
+    // solo se reemplazan si vienen en el pedido — si tratáramos "no vino"
+    // igual que "vino vacío", cada edición básica del artículo borraría
+    // la composición de costos sin que el usuario lo pidiera.
     if (dto.atributos !== undefined) {
       await this.reemplazarAtributos(id, dto.atributos);
     }
     if (dto.componentes !== undefined) {
       await this.reemplazarComponentes(id, dto.componentes);
+    }
+    if (dto.manoDeObra !== undefined) {
+      await this.reemplazarManoDeObra(id, dto.manoDeObra);
     }
     if (dto.subarticulos !== undefined) {
       await this.validarSinCiclos(id, dto.subarticulos);
@@ -118,7 +134,7 @@ export class ArticulosService extends CrudService<Articulo> {
   override async obtenerPorId(id: number): Promise<Articulo> {
     const articulo = await this.repositorio.findOne({
       where: { id, activo: true } as any,
-      relations: { atributos: true, componentes: true, subarticulos: true },
+      relations: { atributos: true, componentes: true, manoDeObra: true, subarticulos: true },
     });
     if (!articulo) {
       throw new Error(`No se encontró el artículo con id ${id}.`);
@@ -127,61 +143,26 @@ export class ArticulosService extends CrudService<Articulo> {
   }
 
   /**
-   * Costo total del artículo, recursivo: suma de sus materiales directos
-   * más, para cada subartículo, `cantidad × costo total de ese
-   * subartículo` (que a su vez puede tener sus propios materiales y
-   * subartículos). Agrupado por moneda, porque distintos materiales o
-   * subartículos pueden estar costeados en ARS y en USD a la vez.
-   *
-   * `visitados` es un corte de seguridad ante datos inconsistentes (no
-   * debería hacer falta en el uso normal, porque `validarSinCiclos` ya
-   * impide guardar una composición circular) — evita un loop infinito si
-   * de todas formas apareciera un ciclo.
+   * Costo total del artículo, recursivo: suma de sus materiales y mano de
+   * obra directos, más, para cada subartículo, `cantidad × costo total de
+   * ese subartículo`. Agrupado por moneda.
    */
   async calcularCostoTotal(articuloId: number, visitados: Set<number> = new Set()): Promise<TotalCostoPorMoneda[]> {
-    if (visitados.has(articuloId)) {
-      return [];
-    }
-    visitados.add(articuloId);
-
-    const articulo = await this.repositorio.findOne({
-      where: { id: articuloId, activo: true } as any,
-      relations: { componentes: true, subarticulos: true },
-    });
-    if (!articulo) {
-      return [];
-    }
-
+    const detallado = await this.calcularCostoDetallado(articuloId, visitados);
     const totales = new Map<Moneda, number>();
-
-    for (const componente of articulo.componentes ?? []) {
-      const costo = await this.materialesService.obtenerCosto(componente.materialId);
-      if (!costo) {
-        continue;
-      }
-      totales.set(costo.moneda, (totales.get(costo.moneda) ?? 0) + componente.cantidad * costo.valor);
+    for (const { moneda, total } of detallado) {
+      totales.set(moneda, (totales.get(moneda) ?? 0) + total);
     }
-
-    for (const subarticulo of articulo.subarticulos ?? []) {
-      const costosSub = await this.calcularCostoTotal(subarticulo.subarticuloId, visitados);
-      for (const { moneda, total } of costosSub) {
-        totales.set(moneda, (totales.get(moneda) ?? 0) + total * subarticulo.cantidad);
-      }
-    }
-
-    return Array.from(totales.entries()).map(([moneda, total]) => ({
-      moneda,
-      total: Math.round((total + Number.EPSILON) * 100) / 100,
-    }));
+    return Array.from(totales.entries()).map(([moneda, total]) => ({ moneda, total: this.redondear(total) }));
   }
 
   /**
-   * Igual que `calcularCostoTotal`, pero además discrimina por tipo de
-   * componente (material / mano de obra / accesorio) — se usa para el
-   * desglose de costos del presupuesto. Recursivo: el desglose de un
-   * subartículo se preserva por tipo al burbujear hacia el padre (un
-   * material dentro de un subartículo sigue contando como "material"
-   * arriba, no se mezcla con la mano de obra del padre).
+   * Igual que `calcularCostoTotal`, pero además discrimina por **origen**
+   * del costo: `material` o `mano_obra` — no por un campo de tipo que
+   * cargue el usuario, sino por de qué tabla de relación vino
+   * (`ArticuloComponente` vs `ArticuloManoDeObra`). Recursivo: el
+   * desglose de un subartículo se preserva por origen al burbujear hacia
+   * el padre.
    */
   async calcularCostoDetallado(articuloId: number, visitados: Set<number> = new Set()): Promise<TotalCostoDetallado[]> {
     if (visitados.has(articuloId)) {
@@ -191,20 +172,20 @@ export class ArticulosService extends CrudService<Articulo> {
 
     const articulo = await this.repositorio.findOne({
       where: { id: articuloId, activo: true } as any,
-      relations: { componentes: true, subarticulos: true },
+      relations: { componentes: true, manoDeObra: true, subarticulos: true },
     });
     if (!articulo) {
       return [];
     }
 
     const totales = new Map<string, TotalCostoDetallado>();
-    const acumular = (tipo: TipoMaterial, moneda: Moneda, monto: number) => {
-      const clave = `${tipo}|${moneda}`;
+    const acumular = (origen: OrigenCosto, moneda: Moneda, monto: number) => {
+      const clave = `${origen}|${moneda}`;
       const actual = totales.get(clave);
       if (actual) {
         actual.total += monto;
       } else {
-        totales.set(clave, { tipo, moneda, total: monto });
+        totales.set(clave, { origen, moneda, total: monto });
       }
     };
 
@@ -213,28 +194,33 @@ export class ArticulosService extends CrudService<Articulo> {
       if (!costo) {
         continue;
       }
-      let tipo: TipoMaterial = 'material';
-      try {
-        const material = await this.materialesService.obtenerPorId(componente.materialId);
-        tipo = material.tipo;
-      } catch {
-        // Material dado de baja o inexistente: lo contamos igual como "material" genérico.
+      acumular('material', costo.moneda, componente.cantidad * costo.valor);
+    }
+
+    for (const asignada of articulo.manoDeObra ?? []) {
+      const costo = await this.manoDeObraService.obtenerCosto(asignada.manoDeObraId);
+      if (!costo) {
+        continue;
       }
-      acumular(tipo, costo.moneda, componente.cantidad * costo.valor);
+      acumular('mano_obra', costo.moneda, asignada.cantidad * costo.valor);
     }
 
     for (const subarticulo of articulo.subarticulos ?? []) {
       const detalleSub = await this.calcularCostoDetallado(subarticulo.subarticuloId, visitados);
-      for (const { tipo, moneda, total } of detalleSub) {
-        acumular(tipo, moneda, total * subarticulo.cantidad);
+      for (const { origen, moneda, total } of detalleSub) {
+        acumular(origen, moneda, total * subarticulo.cantidad);
       }
     }
 
-    return Array.from(totales.values()).map(({ tipo, moneda, total }) => ({
-      tipo,
+    return Array.from(totales.values()).map(({ origen, moneda, total }) => ({
+      origen,
       moneda,
-      total: Math.round((total + Number.EPSILON) * 100) / 100,
+      total: this.redondear(total),
     }));
+  }
+
+  private redondear(valor: number): number {
+    return Math.round((valor + Number.EPSILON) * 100) / 100;
   }
 
   private async reemplazarAtributos(articuloId: number, atributos: GuardarArticuloDto['atributos']): Promise<void> {
@@ -270,6 +256,22 @@ export class ArticulosService extends CrudService<Articulo> {
     }
   }
 
+  private async reemplazarManoDeObra(articuloId: number, manoDeObra: GuardarArticuloDto['manoDeObra']): Promise<void> {
+    const actuales = await this.repositorioManoDeObra.find({ where: { articuloId, activo: true } as any });
+    for (const asignada of actuales) {
+      await this.repositorioManoDeObra.delete(asignada.id);
+    }
+
+    for (const asignado of manoDeObra ?? []) {
+      const nueva = this.repositorioManoDeObra.create({
+        articuloId,
+        manoDeObraId: asignado.manoDeObraId,
+        cantidad: asignado.cantidad,
+      });
+      await this.repositorioManoDeObra.save(nueva);
+    }
+  }
+
   private async reemplazarSubarticulos(articuloId: number, subarticulos: GuardarArticuloDto['subarticulos']): Promise<void> {
     const actuales = await this.repositorioSubarticulos.find({ where: { articuloId, activo: true } as any });
     for (const subarticulo of actuales) {
@@ -300,7 +302,7 @@ export class ArticulosService extends CrudService<Articulo> {
       const generariaCiclo = await this.contieneTransitivamente(propuesto.subarticuloId, articuloId);
       if (generariaCiclo) {
         throw new BadRequestException(
-          `No se puede agregar ese artículo como subartículo: generaría una composición circular (ya contiene, directa o indirectamente, a este artículo).`,
+          'No se puede agregar ese artículo como subartículo: generaría una composición circular (ya contiene, directa o indirectamente, a este artículo).',
         );
       }
     }

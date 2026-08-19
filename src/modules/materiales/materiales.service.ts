@@ -2,32 +2,39 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CrudService } from '../../common/crud.service';
-import { DefinirCostoMaterialDto, GuardarMaterialDto } from './material.dto';
-import { Material, MaterialCosto, MaterialCostoHistorial } from './material.entity';
+import { CategoriasMaterialService } from '../categorias-material/categorias-material.service';
+import { AjustarCostoPorcentajeDto, DefinirCostoRecursoDto } from '../costos-recursos/recurso-costo.dto';
+import { RecursoCosto } from '../costos-recursos/recurso-costo.entity';
+import { RecursoCostoService } from '../costos-recursos/recurso-costo.service';
+import { GuardarMaterialDto } from './material.dto';
+import { Material } from './material.entity';
 
 /** Material junto con su costo vigente (si ya se definió), para simplificar la UI. */
 export interface MaterialConCosto extends Material {
-  costoActual: MaterialCosto | null;
+  costoActual: RecursoCosto | null;
 }
 
 @Injectable()
 export class MaterialesService extends CrudService<Material> {
   constructor(
     @InjectRepository(Material) repositorio: Repository<Material>,
-    @InjectRepository(MaterialCosto) private readonly repositorioCosto: Repository<MaterialCosto>,
-    @InjectRepository(MaterialCostoHistorial) private readonly repositorioHistorial: Repository<MaterialCostoHistorial>,
+    private readonly recursoCostoService: RecursoCostoService,
+    private readonly categoriasMaterialService: CategoriasMaterialService,
   ) {
     super(repositorio, 'material');
   }
 
-  async listarConCosto(busqueda?: string, tipo?: string): Promise<MaterialConCosto[]> {
-    const qb = this.repositorio.createQueryBuilder('material').where('material.activo = :activo', { activo: true });
+  async listarConCosto(busqueda?: string, categoriaId?: number): Promise<MaterialConCosto[]> {
+    const qb = this.repositorio
+      .createQueryBuilder('material')
+      .leftJoinAndSelect('material.categoria', 'categoria')
+      .where('material.activo = :activo', { activo: true });
 
     if (busqueda) {
       qb.andWhere('material.nombre LIKE :busqueda', { busqueda: `%${busqueda}%` });
     }
-    if (tipo) {
-      qb.andWhere('material.tipo = :tipo', { tipo });
+    if (categoriaId) {
+      qb.andWhere('material.categoriaId = :categoriaId', { categoriaId });
     }
     qb.orderBy('material.nombre', 'ASC');
 
@@ -36,68 +43,57 @@ export class MaterialesService extends CrudService<Material> {
       return [];
     }
 
-    const costos = await this.repositorioCosto.find({
-      where: { activo: true },
-    });
-    const costoPorMaterial = new Map(costos.map((costo) => [costo.materialId, costo]));
+    const costoPorMaterial = await this.recursoCostoService.obtenerCostosDe(
+      'material',
+      materiales.map((m) => m.id),
+    );
 
     return materiales.map((material) => ({ ...material, costoActual: costoPorMaterial.get(material.id) ?? null }));
   }
 
   async guardarMaterial(dto: GuardarMaterialDto): Promise<Material> {
-    return this.crear({ nombre: dto.nombre, tipo: dto.tipo, unidadMedida: dto.unidadMedida });
+    return this.crear({ nombre: dto.nombre, categoriaId: dto.categoriaId, unidadMedida: dto.unidadMedida });
   }
 
   async actualizarMaterial(id: number, dto: GuardarMaterialDto): Promise<Material> {
-    return this.actualizar(id, { nombre: dto.nombre, tipo: dto.tipo, unidadMedida: dto.unidadMedida });
+    return this.actualizar(id, { nombre: dto.nombre, categoriaId: dto.categoriaId, unidadMedida: dto.unidadMedida });
   }
 
-  async obtenerCosto(materialId: number): Promise<MaterialCosto | null> {
-    return this.repositorioCosto.findOne({ where: { materialId, activo: true } });
+  obtenerCosto(materialId: number) {
+    return this.recursoCostoService.obtenerCosto('material', materialId);
   }
 
-  /** Historial de valores reemplazados de un material, del más reciente al más antiguo. */
-  async historialDeCosto(materialId: number): Promise<MaterialCostoHistorial[]> {
-    return this.repositorioHistorial.find({
-      where: { materialId },
-      order: { vigenteHasta: 'DESC' },
-    });
+  historialDeCosto(materialId: number) {
+    return this.recursoCostoService.historialDe('material', materialId);
+  }
+
+  definirCosto(materialId: number, dto: DefinirCostoRecursoDto) {
+    return this.recursoCostoService.definirCosto('material', materialId, dto);
   }
 
   /**
-   * Define (da de alta o actualiza) el costo vigente de un material. Si ya
-   * había un valor vigente, lo pasa a `materiales_costo_historial` (con su
-   * fecha de vigencia original y `vigenteHasta` = ahora) antes de grabar el
-   * valor nuevo — mismo criterio que `PreciosArticuloService.definirValor`.
+   * Aplica un % de ajuste al costo vigente de todos los materiales de una
+   * o más categorías **y de todas sus subcategorías** (recursivo — ver
+   * `CategoriasMaterialService.obtenerIdsConDescendientes`). Si dos
+   * categorías elegidas se superponen (una es ancestro de la otra), los
+   * materiales no se duplican ni se ajustan dos veces.
    */
-  async definirCosto(materialId: number, dto: DefinirCostoMaterialDto): Promise<MaterialCosto> {
-    const actual = await this.obtenerCosto(materialId);
-    const ahora = new Date();
-
-    if (!actual) {
-      const nuevo = this.repositorioCosto.create({
-        materialId,
-        moneda: dto.moneda,
-        valor: dto.valor,
-        vigenteDesde: ahora,
-        activo: true,
-      });
-      return this.repositorioCosto.save(nuevo);
+  async ajustarCostoPorCategoria(categoriaIds: number[], dto: AjustarCostoPorcentajeDto) {
+    const idsCategoriasSet = new Set<number>();
+    for (const categoriaId of categoriaIds) {
+      const descendientes = await this.categoriasMaterialService.obtenerIdsConDescendientes(categoriaId);
+      descendientes.forEach((id) => idsCategoriasSet.add(id));
     }
 
-    const historico = this.repositorioHistorial.create({
-      materialId,
-      moneda: actual.moneda,
-      valor: actual.valor,
-      vigenteDesde: actual.vigenteDesde,
-      vigenteHasta: ahora,
-      activo: true,
-    });
-    await this.repositorioHistorial.save(historico);
-
-    actual.moneda = dto.moneda;
-    actual.valor = dto.valor;
-    actual.vigenteDesde = ahora;
-    return this.repositorioCosto.save(actual);
+    const materiales = await this.repositorio
+      .createQueryBuilder('material')
+      .where('material.categoriaId IN (:...ids)', { ids: Array.from(idsCategoriasSet) })
+      .andWhere('material.activo = :activo', { activo: true })
+      .getMany();
+    return this.recursoCostoService.ajustarCostoPorcentaje(
+      'material',
+      materiales.map((m) => m.id),
+      dto.porcentaje,
+    );
   }
 }

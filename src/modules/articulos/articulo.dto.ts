@@ -1,7 +1,6 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
-  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -29,6 +28,16 @@ export class AtributoAsignadoDto {
 export class ComponenteAsignadoDto {
   @IsInt()
   materialId: number;
+
+  @IsNumber()
+  @IsPositive()
+  cantidad: number;
+}
+
+/** Mano de obra usada como componente de costo de este artículo. */
+export class ManoDeObraAsignadaDto {
+  @IsInt()
+  manoDeObraId: number;
 
   @IsNumber()
   @IsPositive()
@@ -80,6 +89,12 @@ export class GuardarArticuloDto {
   @ValidateNested({ each: true })
   @Type(() => ComponenteAsignadoDto)
   componentes?: ComponenteAsignadoDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ManoDeObraAsignadaDto)
+  manoDeObra?: ManoDeObraAsignadaDto[];
 
   @IsOptional()
   @IsArray()

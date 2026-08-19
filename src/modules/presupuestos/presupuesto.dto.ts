@@ -11,17 +11,16 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Moneda } from '../listas-precio/entities/lista-precio.entity';
-import { TipoMaterial } from '../materiales/material.entity';
 import { TipoServicio } from './entities/presupuesto.entity';
 
 const SERVICIOS_VALIDOS: TipoServicio[] = ['venta_contenedores', 'alquiler_contenedores', 'modificacion', 'accesorios'];
 const MONEDAS_VALIDAS: Moneda[] = ['ARS', 'USD'];
-const TIPOS_MATERIAL_VALIDOS: TipoMaterial[] = ['material', 'estructural', 'insumos', 'accesorio', 'mano_obra'];
+const ORIGENES_COSTO_VALIDOS: ('material' | 'mano_obra')[] = ['material', 'mano_obra'];
 
 /** Una entrada del costo (por unidad) de un ítem, congelada al momento de agregarlo. */
 export class CostoDetalladoItemDto {
-  @IsIn(TIPOS_MATERIAL_VALIDOS)
-  tipo: TipoMaterial;
+  @IsIn(ORIGENES_COSTO_VALIDOS)
+  origen: 'material' | 'mano_obra';
 
   @IsIn(MONEDAS_VALIDAS)
   moneda: Moneda;
@@ -57,7 +56,7 @@ export class PresupuestoItemDto {
   @Min(0)
   descuentoValor: number;
 
-  /** Costo por unidad, discriminado por tipo/moneda, congelado al momento de agregar el ítem. */
+  /** Costo por unidad, discriminado por origen/moneda, congelado al momento de agregar el ítem. */
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
